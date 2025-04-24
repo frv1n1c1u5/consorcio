@@ -16,6 +16,7 @@ def format_brl(x: float) -> str:
 
 @st.cache_data(show_spinner=False)
 def fetch_index(series_id: str, start: str, end: str) -> pd.Series:
+    """Busca índice mensal (1 + variação) no SGS do BCB."""
     url = (
         f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{series_id}/dados"
         f"?formato=json&dataInicial={start}&dataFinal={end}"
@@ -39,13 +40,13 @@ st.markdown(
 with st.sidebar:
     st.header("Parâmetros de Entrada")
     valor = st.number_input("Valor Necessário (R$)", 0.0, 1e9, 500_000.00, 1_000.00, "%.2f")
-    entrada = st.number_input("Entrada (R$)", 0.0, 1e9, 100_000.00, 1_000.00, "%.2f")
+    entrada = st.number_input("Entrada (R$)",      0.0, 1e9, 100_000.00, 1_000.00, "%.2f")
     juros_ano = st.number_input("Juros Financiamento (% a.a.)", 0.0, 100.0, 12.0, 0.1, "%.2f")
     prazo_fin = st.number_input("Prazo Financiamento (meses)", 1, 600, 200, 1)
     modelo_fin = st.selectbox("Modelo de Financiamento", ["Price", "SAC"])
-    prazo_cons = st.number_input("Prazo Consórcio (meses)", 1, 600, 200, 1)
+    prazo_cons = st.number_input("Prazo Consórcio (meses)",      1, 600, 200, 1)
     idx_choice = st.selectbox("Índice de Reajuste do Consórcio", ["Fixo 5%", "IPCA", "INPC", "IGP-M"])
-    taxa_gap = st.number_input("Rendimento do Gap (% a.a.)", 0.0, 100.0, 10.0, 0.1, "%.2f")
+    taxa_gap  = st.number_input("Rendimento do Gap (% a.a.)",   0.0, 100.0, 10.0, 0.1, "%.2f")
     taxa_desc = st.number_input("Taxa Desconto p/ VPL (% a.a.)", 0.0, 100.0, 10.0, 0.1, "%.2f")
     calcular = st.button("Calcular")
 
@@ -55,7 +56,7 @@ if not calcular:
 
 # ─── 1) Financiamento ───────────────────────────────────────────────────────────
 PV = valor - entrada
-r_mens = (1 + juros_ano/100)**(1/12) - 1
+r_mens = (1 + juros_ano/100) ** (1/12) - 1
 n_fin = int(prazo_fin)
 meses_fin = np.arange(1, n_fin+1)
 
@@ -100,7 +101,7 @@ factors = [fator_anual ** ((m-1)//12) for m in range(1, prazo_cons+1)]
 parc_cons = [base_cons * f for f in factors]
 df_cons = pd.DataFrame({"Parcela":parc_cons}, index=np.arange(1, prazo_cons+1))
 
-# ─── 3) Total Pago ──────────────────────────────────────────────────────────────
+# ─── 3) Total Pago ─────────────────────────────────────────────────────────────
 total_fin = df_fin["Parcela"].sum() + entrada
 total_cons= df_cons["Parcela"].sum()
 df_tot = pd.DataFrame({
@@ -111,20 +112,22 @@ st.subheader("Total Pago")
 st.table(df_tot)
 
 # ─── 4) Fluxo de Caixa Acumulado ────────────────────────────────────────────────
-cf_fin  = [-entrada] + (-df_fin["Parcela"]).tolist()
-cf_cons = [0] + (-df_cons["Parcela"]).tolist()
+cf_fin  = [ PV ] + [-p for p in df_fin["Parcela"].tolist()]
+cf_cons = [ valor ] + [-p for p in df_cons["Parcela"].tolist()]
 L = max(len(cf_fin), len(cf_cons))
 cf_fin  += [0]*(L-len(cf_fin))
 cf_cons += [0]*(L-len(cf_cons))
 cum_fin  = np.cumsum(cf_fin)
 cum_cons = np.cumsum(cf_cons)
 df_cf = pd.DataFrame({
-    "Mês": np.arange(0, L),
+    "Mês":[0] + list(np.arange(1, L)),
     "Financiamento": cum_fin,
-    "Consórcio":    cum_cons
+    "Consórcio":     cum_cons
 })
-fig_cf = px.line(df_cf, x="Mês", y=["Financiamento","Consórcio"],
-                 title="Fluxo de Caixa Acumulado", template="plotly_white")
+fig_cf = px.line(
+    df_cf, x="Mês", y=["Financiamento","Consórcio"],
+    title="Fluxo de Caixa Acumulado", template="plotly_white"
+)
 fig_cf.update_layout(yaxis_tickformat=",.0f")
 st.subheader("Fluxo de Caixa Acumulado")
 st.plotly_chart(fig_cf, use_container_width=True)
@@ -149,12 +152,12 @@ length = max(len(df_fin), len(df_cons))
 x      = np.arange(1, length+1)
 fin_p  = list(df_fin["Parcela"]) + [None]*(length-len(df_fin))
 cons_p = list(df_cons["Parcela"])+ [None]*(length-len(df_cons))
-gap    = np.array([ (f or 0)-(c or 0) for f,c in zip(fin_p,cons_p) ])
+gap    = np.array([(f or 0)-(c or 0) for f,c in zip(fin_p,cons_p)])
 flips  = [i+1 for i in range(1,len(gap)) if np.sign(gap[i])!=np.sign(gap[i-1])]
 
 fig = go.Figure()
-fig.add_trace(go.Bar(x=x, y=cons_p, name="Consórcio",   marker_color="#00FFC2", width=0.6))
-fig.add_trace(go.Bar(x=x, y=fin_p,   name="Financiamento",marker_color="#2081E2", width=0.6))
+fig.add_trace(go.Bar(x=x, y=cons_p, name="Consórcio",    marker_color="#00FFC2", width=0.6))
+fig.add_trace(go.Bar(x=x, y=fin_p,   name="Financiamento", marker_color="#2081E2", width=0.6))
 for m in flips:
     fig.add_vline(x=m, line_dash="dash", line_color="yellow",
                   annotation_text=f"Mês {m}", annotation_position="top right")
@@ -168,7 +171,7 @@ with st.expander("📌 Metodologia"):
     st.markdown("""
 - **Fluxo de Caixa**: saldo acumulado de entrada e parcelas.  
 - **VPL**: descontado à taxa informada.  
-- **TIR**: anualizada via `numpy_financial.irr`.  
+- **TIR**: anualizada a partir do fluxo (entrada positiva + saídas).  
 - **Reajuste**: fixo ou real (IPCA/INPC/IGP-M) pelos últimos 12m.  
 - **Alertas**: marca meses em que o gap muda de sinal.
 """)
