@@ -1,8 +1,0 @@
-# .streamlit/config.toml
-[theme]
-base="dark"
-primaryColor="#1f77b4"            # cor dos controles
-backgroundColor="#0E1117"         # fundo da app
-secondaryBackgroundColor="#131622" # fundo de sidebar
-textColor="#FAFAFA"               # cor do texto
-font="sans serif"
