@@ -20,7 +20,8 @@ def fetch_index(series_id: str, start: str, end: str) -> pd.Series:
         f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{series_id}/dados"
         f"?formato=json&dataInicial={start}&dataFinal={end}"
     )
-    df = pd.DataFrame(requests.get(url).json())
+    resp = requests.get(url); resp.raise_for_status()
+    df = pd.DataFrame(resp.json())
     df["data"] = pd.to_datetime(df["data"], dayfirst=True)
     df["valor"] = df["valor"].str.replace(",", ".").astype(float) / 100 + 1
     df.set_index("data", inplace=True)
@@ -28,53 +29,51 @@ def fetch_index(series_id: str, start: str, end: str) -> pd.Series:
 
 # ─── Título ────────────────────────────────────────────────────────────────────
 st.title("Simulador Consórcio vs Financiamento")
-st.markdown(
-    "Adicionamos o cálculo de CET (Custo Efetivo Total) para financiamento e consórcio."
-)
+st.markdown("Agora com **CET** calculado para ambas as opções.")
 
 # ─── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("Parâmetros Básicos")
-    valor = st.number_input("Valor Necessário (R$)", 0.0, 1e9, 500_000.00, 1_000.00, "%.2f")
-    entrada = st.number_input("Entrada (R$)",      0.0, 1e9, 100_000.00, 1_000.00, "%.2f")
-    juros_ano = st.number_input("Juros Fin. (% a.a.)", 0.0, 100.0, 12.0, 0.1, "%.2f")
-    prazo_fin = st.number_input("Prazo Fin. (meses)", 1, 600, 200, 1)
-    modelo_fin = st.selectbox("Modelo Financiamento", ["Price", "SAC"])
-    st.header("Custos Adicionais Financiamento")
-    iof_pct = st.number_input("IOF (% sobre PV)",   0.0, 5.0, 0.38, 0.01, "%.2f")
-    seguro_pct = st.number_input("Seguro (% a.a.)",  0.0, 10.0, 0.50, 0.01, "%.2f")
-    st.header("Parâmetros Consórcio")
-    prazo_cons = st.number_input("Prazo Consórcio (meses)", 1, 600, 200, 1)
-    idx_choice = st.selectbox("Índice Reajuste", ["Fixo 5%", "IPCA", "INPC", "IGP-M"])
+    st.header("Dados Básicos")
+    valor      = st.number_input("Valor Necessário (R$)",       0.0, 1e9, 500_000.00, 1_000.00, "%.2f")
+    entrada    = st.number_input("Entrada (R$)",                0.0, 1e9, 100_000.00, 1_000.00, "%.2f")
+    juros_ano  = st.number_input("Juros Fin. (% a.a.)",         0.0, 100.0, 12.0, 0.1, "%.2f")
+    prazo_fin  = st.number_input("Prazo Fin. (meses)",          1,   600,   200,    1)
+    modelo_fin = st.selectbox  ("Modelo Financiamento", ["Price","SAC"])
+    st.header("Custos Financiamento")
+    iof_pct    = st.number_input("IOF (% sobre PV)",            0.0,   5.0,  0.38,  0.01, "%.2f")
+    seguro_pct = st.number_input("Seguro (% a.a.)",             0.0,  10.0,  0.50,  0.01, "%.2f")
+    st.header("Dados do Consórcio")
+    prazo_cons = st.number_input("Prazo Consórcio (meses)",      1,   600,   200,    1)
+    idx_choice = st.selectbox  ("Índice de Reajuste", ["Fixo 5%","IPCA","INPC","IGP-M"])
     st.header("Investimento & VPL")
-    taxa_gap = st.number_input("Rendimento do Gap (% a.a.)",   0.0, 100.0, 10.0, 0.1, "%.2f")
-    taxa_desc = st.number_input("Taxa Desconto p/ VPL (% a.a.)",0.0, 100.0, 10.0, 0.1, "%.2f")
-    calcular = st.button("Calcular")
+    taxa_gap   = st.number_input("Rendimento do Gap (% a.a.)",  0.0,  100.0, 10.0,  0.1, "%.2f")
+    taxa_desc  = st.number_input("Taxa Desconto p/ VPL (% a.a.)",0.0,  100.0, 10.0,  0.1, "%.2f")
+    calcular   = st.button("Calcular")
 
 if not calcular:
     st.info("Preencha os parâmetros e clique em **Calcular**.")
     st.stop()
 
 # ─── 1) Financiamento ───────────────────────────────────────────────────────────
-PV = valor - entrada
-r_mens = (1 + juros_ano/100)**(1/12) - 1
-n_fin = int(prazo_fin)
-meses_fin = np.arange(1, n_fin+1)
+PV      = valor - entrada
+r_mens  = (1 + juros_ano/100)**(1/12) - 1
+n_fin   = int(prazo_fin)
+meses_f = np.arange(1, n_fin+1)
 
-# parcelas
+# Gera as parcelas Price/SAC
 A_price = PV * r_mens / (1 - (1 + r_mens)**(-n_fin))
-df_price = pd.DataFrame(index=meses_fin, columns=["Parcela"])
+df_price = pd.DataFrame(index=meses_f, columns=["Parcela"], dtype=float)
 bal = PV
-for m in meses_fin:
+for m in meses_f:
     j = bal * r_mens
     am = A_price - j
     bal -= am
     df_price.loc[m, "Parcela"] = A_price
 
-amort = PV / n_fin
-df_sac = pd.DataFrame(index=meses_fin, columns=["Parcela"])
+df_sac = pd.DataFrame(index=meses_f, columns=["Parcela"], dtype=float)
 bal = PV
-for m in meses_fin:
+amort = PV / n_fin
+for m in meses_f:
     j = bal * r_mens
     pmt = amort + j
     bal -= amort
@@ -89,19 +88,19 @@ if idx_choice=="Fixo 5%":
     st.metric("Reajuste Anual (Fixo)", "5,00%")
 else:
     series_map = {"IPCA":"433","INPC":"188","IGP-M":"189"}
-    end = datetime.today().strftime("%d/%m/%Y")
+    end   = datetime.today().strftime("%d/%m/%Y")
     start = (datetime.today() - timedelta(days=400)).strftime("%d/%m/%Y")
-    idx_series = fetch_index(series_map[idx_choice], start, end)
-    last12 = idx_series[-12:]
-    fator_anual = last12.prod()
+    idx = fetch_index(series_map[idx_choice], start, end)
+    last12 = idx[-12:]; fator_anual = last12.prod()
     st.metric(f"Acumulado 12m ({idx_choice})", f"{(fator_anual-1)*100:.2f}%")
-factors = [fator_anual ** ((m-1)//12) for m in range(1, prazo_cons+1)]
-parc_cons = [base_cons * f for f in factors]
-df_cons = pd.DataFrame({"Parcela":parc_cons}, index=np.arange(1, prazo_cons+1))
 
-# ─── 3) Total Pago ─────────────────────────────────────────────────────────────
-total_fin = df_fin["Parcela"].sum() + entrada
-total_cons= df_cons["Parcela"].sum()
+factors   = [fator_anual**((m-1)//12) for m in range(1, prazo_cons+1)]
+parc_cons = [base_cons * f   for f in factors]
+df_cons   = pd.DataFrame({"Parcela":parc_cons}, index=np.arange(1, prazo_cons+1))
+
+# ─── 3) Totais ──────────────────────────────────────────────────────────────────
+total_fin  = df_fin["Parcela"].sum() + entrada
+total_cons = df_cons["Parcela"].sum()
 df_tot = pd.DataFrame({
     "Alternativa":["Financiamento","Consórcio"],
     "Total Pago":[format_brl(total_fin), format_brl(total_cons)]
@@ -109,12 +108,11 @@ df_tot = pd.DataFrame({
 st.subheader("Total Pago")
 st.table(df_tot)
 
-# ─── 4) Fluxo de Caixa Acumulado ────────────────────────────────────────────────
+# ─── 4) Fluxo de Caixa ──────────────────────────────────────────────────────────
 cf_fin  = [ PV ] + [-p for p in df_fin["Parcela"]]
 cf_cons = [ valor ] + [-p for p in df_cons["Parcela"]]
 L = max(len(cf_fin), len(cf_cons))
-cf_fin  += [0]*(L-len(cf_fin))
-cf_cons += [0]*(L-len(cf_cons))
+cf_fin  += [0]*(L-len(cf_fin));  cf_cons += [0]*(L-len(cf_cons))
 df_cf = pd.DataFrame({
     "Mês": np.arange(0, L),
     "Financiamento": np.cumsum(cf_fin),
@@ -126,41 +124,32 @@ fig_cf.update_layout(yaxis_tickformat=",.0f")
 st.subheader("Fluxo de Caixa Acumulado")
 st.plotly_chart(fig_cf, use_container_width=True)
 
-# ─── 5) VPL, TIR e CET ──────────────────────────────────────────────────────────
+# ─── 5) VPL/TIR/CET ─────────────────────────────────────────────────────────────
 r_desc = (1+taxa_desc/100)**(1/12)-1
-
-# VPL
 npv_fin  = sum(cf_fin[t]/((1+r_desc)**t) for t in range(L))
 npv_cons = sum(cf_cons[t]/((1+r_desc)**t) for t in range(L))
+irr_fin  = nf.irr(cf_fin);  tir_fin  = (1+irr_fin)**12-1 if irr_fin else None
+irr_cons = nf.irr(cf_cons); tir_cons = (1+irr_cons)**12-1 if irr_cons else None
 
-# TIR
-irr_fin  = nf.irr(cf_fin)
-irr_cons = nf.irr(cf_cons)
-tir_fin  = (1+irr_fin)**12-1 if irr_fin else None
-tir_cons = (1+irr_cons)**12-1 if irr_cons else None
+# CET Financiamento: IOF no PV e seguro mensal
+iof_amt     = PV * iof_pct/100
+pv_net_fin  = PV - iof_amt
+mensal_seg  = PV * (seguro_pct/100)/12
+cf_cet_fin  = [ pv_net_fin ] + [ -(df_fin.loc[m,"Parcela"]+mensal_seg) for m in meses_f ]
+irr_cet_fin = nf.irr(cf_cet_fin); cet_fin = (1+irr_cet_fin)**12-1 if irr_cet_fin else None
 
-# CET Financiamento: inclui IOF e seguro
-# IOF e seguro no PV e parcelas
-iof_amt = PV * iof_pct/100
-pv_net = PV - iof_amt
-mensal_seg = PV * (seguro_pct/100)/12
-cf_cet_fin = [ pv_net ] + [ -(float(df_fin.loc[m,"Parcela"]) + mensal_seg) for m in meses_fin ]
-cet_irr = nf.irr(cf_cet_fin)
-cet_fin = (1+cet_irr)**12-1 if cet_irr else None
-
-# CET Consórcio: crédito líquido após admin+reserva
-pv_cons_net = valor * (1 - 0.20 - 0.03)
-cf_cet_cons = [ pv_cons_net ] + [ -p for p in df_cons["Parcela"] ]
-cet_irr2 = nf.irr(cf_cet_cons)
-cet_cons = (1+cet_irr2)**12-1 if cet_irr2 else None
+# CET Consórcio: crédito líquido
+pv_net_cons  = valor * (1 - 0.20 - 0.03)
+cf_cet_cons  = [ pv_net_cons ] + [ -p for p in df_cons["Parcela"] ]
+irr_cet_cons = nf.irr(cf_cet_cons); cet_cons = (1+irr_cet_cons)**12-1 if irr_cet_cons else None
 
 c1,c2,c3,c4,c5,c6 = st.columns(6)
-c1.metric("VPL Fin.", format_brl(npv_fin))
-c2.metric("VPL Cons.",format_brl(npv_cons))
-c3.metric("TIR Fin.",  f"{tir_fin*100:.2f}%" if tir_fin else "—")
-c4.metric("TIR Cons.", f"{tir_cons*100:.2f}%" if tir_cons else "—")
-c5.metric("CET Fin.",  f"{cet_fin*100:.2f}%" if cet_fin else "—")
-c6.metric("CET Cons.", f"{cet_cons*100:.2f}%" if cet_cons else "—")
+c1.metric("VPL Fin.",    format_brl(npv_fin))
+c2.metric("VPL Cons.",   format_brl(npv_cons))
+c3.metric("TIR Fin.",    f"{tir_fin*100:.2f}%" if tir_fin else "—")
+c4.metric("TIR Cons.",   f"{tir_cons*100:.2f}%" if tir_cons else "—")
+c5.metric("CET Fin.",    f"{cet_fin*100:.2f}%" if cet_fin else "—")
+c6.metric("CET Cons.",   f"{cet_cons*100:.2f}%" if cet_cons else "—")
 
 # ─── 6) Parcelas & Alertas ─────────────────────────────────────────────────────
 length = max(len(df_fin), len(df_cons))
@@ -184,8 +173,8 @@ st.plotly_chart(fig, use_container_width=True)
 # ─── 7) Metodologia ────────────────────────────────────────────────────────────
 with st.expander("📌 Metodologia"):
     st.markdown("""
-- **CET Financiamento**: IRR incluindo IOF no PV e seguro mensal.  
-- **CET Consórcio**: IRR considerando crédito líquido (sem admin+reserva).  
-- **TIR**: IRR do fluxo padrão (crédito e parcelas).  
+- **CET Financiamento**: IRR incluindo IOF e seguro.  
+- **CET Consórcio**: IRR considerando crédito líquido.  
+- **TIR**: IRR do fluxo padrão (crédito + parcelas).  
 - **VPL**: descontado à taxa informada.  
 """)
